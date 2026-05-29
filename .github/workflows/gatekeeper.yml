@@ -1,0 +1,42 @@
+name: Gatekeeper
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  deterministic:
+    name: Deterministic layer
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show review scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Gatekeeper validates project artifacts, not only code."
+          echo "In scope: code, documentation, configuration, prompts, workflows, and examples."
+
+      - name: Run conventional validation script
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -x .github/gatekeeper-validate.sh ]; then
+            ./.github/gatekeeper-validate.sh
+          elif [ -f .github/gatekeeper-validate.sh ]; then
+            bash ./.github/gatekeeper-validate.sh
+          else
+            echo "::warning title=No deterministic validation::No .github/gatekeeper-validate.sh script was found."
+            echo "Judgment review should treat this PR as lower-confidence, especially for docs, config, prompts, and workflow changes."
+          fi
