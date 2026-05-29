@@ -15,6 +15,19 @@ run_npm_script() {
   checks_run=$((checks_run + 1))
 }
 
+ensure_python_tools() {
+  if [ -n "${GATEKEEPER_PYTHON_TOOLS_READY:-}" ]; then
+    return
+  fi
+
+  local venv_dir="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/gatekeeper-python-tools"
+  python3 -m venv "$venv_dir"
+  # shellcheck disable=SC1091
+  . "$venv_dir/bin/activate"
+  python3 -m pip install --upgrade pip
+  GATEKEEPER_PYTHON_TOOLS_READY=1
+}
+
 if [ -f package.json ]; then
   if command -v corepack >/dev/null 2>&1; then
     corepack enable || true
@@ -46,19 +59,44 @@ if [ -f Makefile ]; then
 fi
 
 if [ -f pyproject.toml ] || [ -f requirements.txt ] || [ -d tests ]; then
-  python3 -m pip install --upgrade pip
+  if [ -f uv.lock ]; then
+    if ! command -v uv >/dev/null 2>&1; then
+      ensure_python_tools
+      python3 -m pip install uv
+    fi
+    uv sync --locked --dev
 
-  if [ -f requirements.txt ]; then
-    python3 -m pip install -r requirements.txt
-  fi
+    if [ -d tests ]; then
+      uv run pytest
+      checks_run=$((checks_run + 1))
+    fi
 
-  if [ -f pyproject.toml ]; then
-    python3 -m pip install -e ".[dev]" || python3 -m pip install -e . || true
-  fi
+    if [ -f pyproject.toml ] && grep -Eq '^\[tool\.ruff' pyproject.toml; then
+      uv run ruff check
+      checks_run=$((checks_run + 1))
+    fi
+  else
+    ensure_python_tools
 
-  if python3 -m pytest --version >/dev/null 2>&1; then
-    python3 -m pytest
-    checks_run=$((checks_run + 1))
+    if [ -f requirements.txt ]; then
+      python3 -m pip install -r requirements.txt
+    fi
+
+    if [ -f pyproject.toml ]; then
+      python3 -m pip install -e .
+    fi
+
+    if [ -d tests ]; then
+      python3 -m pip install pytest
+      python3 -m pytest
+      checks_run=$((checks_run + 1))
+    fi
+
+    if [ -f pyproject.toml ] && grep -Eq '^\[tool\.ruff' pyproject.toml; then
+      python3 -m pip install ruff
+      python3 -m ruff check
+      checks_run=$((checks_run + 1))
+    fi
   fi
 fi
 
